@@ -4,7 +4,7 @@ import argparse
 import torch
 import scipy.linalg
 import random
-from kornia import morphology, filters
+# from kornia import morphology, filters
 
 SAMPLING_RATE = None
 
@@ -611,43 +611,43 @@ def normalize4(func, dim=0):
     return fn
 
 
-def gradient():
-    def fn(x):
-        x = x.unsqueeze(0)
-        kernel = torch.ones(4, 4).to(x.get_device())
-        x = morphology.gradient(x, kernel)
-        x = x.squeeze(0)
-        return x
-    return fn
-
-
-def dilation(r):
-    def fn(x):
-        x = x.unsqueeze(0)
-        kernel = torch.ones(r, r).to(x.get_device())
-        x = morphology.dilation(x, kernel)
-        x = x.squeeze(0)
-        return x
-    return fn
-
-
-def erosion(r):
-    def fn(x):
-        x = x.unsqueeze(0)
-        kernel = torch.ones(r, r).to(x.get_device())
-        x = morphology.erosion(x, kernel)
-        x = x.squeeze(0)
-        return x
-    return fn
-
-
-def sobel(r=True):
-    def fn(x):
-        x = x.unsqueeze(0)
-        x = filters.sobel(x, normalized=r)
-        x = x.squeeze(0)
-        return x
-    return fn
+# def gradient():
+#     def fn(x):
+#         x = x.unsqueeze(0)
+#         kernel = torch.ones(4, 4).to(x.get_device())
+#         x = morphology.gradient(x, kernel)
+#         x = x.squeeze(0)
+#         return x
+#     return fn
+#
+#
+# def dilation(r):
+#     def fn(x):
+#         x = x.unsqueeze(0)
+#         kernel = torch.ones(r, r).to(x.get_device())
+#         x = morphology.dilation(x, kernel)
+#         x = x.squeeze(0)
+#         return x
+#     return fn
+#
+#
+# def erosion(r):
+#     def fn(x):
+#         x = x.unsqueeze(0)
+#         kernel = torch.ones(r, r).to(x.get_device())
+#         x = morphology.erosion(x, kernel)
+#         x = x.squeeze(0)
+#         return x
+#     return fn
+#
+#
+# def sobel(r=True):
+#     def fn(x):
+#         x = x.unsqueeze(0)
+#         x = filters.sobel(x, normalized=r)
+#         x = x.squeeze(0)
+#         return x
+#     return fn
 
 
 
