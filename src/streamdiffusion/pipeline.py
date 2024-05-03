@@ -1,5 +1,5 @@
 import time
-from typing import List, Optional, Union, Any, Dict, Tuple, Literal
+from typing import List, Optional, Union, Any, Dict, Tuple, Literal, Callable
 
 import numpy as np
 import PIL.Image
@@ -25,6 +25,8 @@ class StreamDiffusion:
         use_denoising_batch: bool = True,
         frame_buffer_size: int = 1,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
+        bending_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+
     ) -> None:
         self.device = pipe.device
         self.dtype = torch_dtype
@@ -40,6 +42,8 @@ class StreamDiffusion:
         self.denoising_steps_num = len(t_index_list)
 
         self.cfg_type = cfg_type
+
+        self.bending_fn = bending_fn
 
         if use_denoising_batch:
             self.batch_size = self.denoising_steps_num * frame_buffer_size
@@ -130,7 +134,11 @@ class StreamDiffusion:
         delta: float = 1.0,
         generator: Optional[torch.Generator] = torch.Generator(),
         seed: int = 2,
+        bending_fn: Optional[Callable] = None,
+        input_noise: Optional[torch.Tensor] = None,
     ) -> None:
+        self.bending_fn = bending_fn
+        self.input_noise = input_noise
         self.generator = generator
         self.generator.manual_seed(seed)
         # initialize x_t_latent (it can be any random tensor)
@@ -470,11 +478,22 @@ class StreamDiffusion:
 
     @torch.no_grad()
     def txt2img(self, batch_size: int = 1) -> torch.Tensor:
+        # x_0_pred_out = self.predict_x0_batch(
+        #     torch.randn((batch_size, 4, self.latent_height, self.latent_width)).to(
+        #         device=self.device, dtype=self.dtype
+        #     )
+        # )
+
         x_0_pred_out = self.predict_x0_batch(
-            torch.randn((batch_size, 4, self.latent_height, self.latent_width)).to(
+            self.input_noise.to(
                 device=self.device, dtype=self.dtype
             )
         )
+
+        # apply network bending
+        if self.bending_fn is not None:
+            x_0_pred_out = self.bending_fn(x_0_pred_out)
+
         x_output = self.decode_image(x_0_pred_out).detach().clone()
         return x_output
 

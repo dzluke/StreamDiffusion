@@ -2,7 +2,7 @@ import gc
 import os
 from pathlib import Path
 import traceback
-from typing import List, Literal, Optional, Union, Dict
+from typing import List, Literal, Optional, Union, Dict, Callable
 
 import numpy as np
 import torch
@@ -47,6 +47,7 @@ class StreamDiffusionWrapper:
         seed: int = 2,
         use_safety_checker: bool = False,
         engine_dir: Optional[Union[str, Path]] = "engines",
+        bending_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
     ):
         """
         Initializes the StreamDiffusionWrapper.
@@ -163,6 +164,7 @@ class StreamDiffusionWrapper:
             cfg_type=cfg_type,
             seed=seed,
             engine_dir=engine_dir,
+            bending_fn=bending_fn,
         )
 
         if device_ids is not None:
@@ -180,6 +182,8 @@ class StreamDiffusionWrapper:
         num_inference_steps: int = 50,
         guidance_scale: float = 1.2,
         delta: float = 1.0,
+        bending_fn: Optional[Callable] = None,
+        input_noise: Optional[torch.Tensor] = None,
     ) -> None:
         """
         Prepares the model for inference.
@@ -202,6 +206,8 @@ class StreamDiffusionWrapper:
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             delta=delta,
+            bending_fn=bending_fn,
+            input_noise=input_noise
         )
 
     def __call__(
@@ -362,6 +368,8 @@ class StreamDiffusionWrapper:
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
         seed: int = 2,
         engine_dir: Optional[Union[str, Path]] = "engines",
+        bending_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
+
     ) -> StreamDiffusion:
         """
         Loads the model.
@@ -437,6 +445,7 @@ class StreamDiffusionWrapper:
             frame_buffer_size=self.frame_buffer_size,
             use_denoising_batch=self.use_denoising_batch,
             cfg_type=cfg_type,
+            bending_fn=bending_fn
         )
         if not self.sd_turbo:
             if use_lcm_lora:
