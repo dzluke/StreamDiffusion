@@ -55,7 +55,6 @@ util.clear_dir(IMAGE_STORAGE_PATH)
 output = IMAGE_STORAGE_PATH
 model_id_or_path = "runwayml/stable-diffusion-v1-5"
 lora_dict = None
-prompt = "a floating orb"
 width = 512
 height = 512
 frame_buffer_size = 1  # batch size
@@ -63,11 +62,12 @@ acceleration = "xformers"
 seed = 46
 t_index_list = [0, 16, 32, 45]
 
-prompt = "cinematic dunes, sand, epic 4k"
+prompt = "a floating orb"
 layer = 1
 bend_function = util.add_full
 bend_function_name = bend_function.__name__
 audio_feature = util.rms
+audio_feature_scale = 10
 audio_feature_name = audio_feature.__name__
 
 
@@ -132,9 +132,11 @@ print(f">>> Generating {num_frames} frames")
 
 # Adding sin wave noise
 walk_length = 2  # set to 2 for 2pi walk
-noise = torch.empty((stream.stream.latent_height, stream.stream.latent_width, 4), dtype=torch.float64)
-walk_noise_x = torch.distributions.normal.Normal(0, 1).sample(noise.shape).double()
-walk_noise_y = torch.distributions.normal.Normal(0, 1).sample(noise.shape).double()
+noise = torch.empty((1, 4, stream.stream.latent_height, stream.stream.latent_width), dtype=torch.float64)
+# walk_noise_x = torch.distributions.normal.Normal(0, 1).sample(noise.shape).double()
+# walk_noise_y = torch.distributions.normal.Normal(0, 1).sample(noise.shape).double()
+walk_noise_x = torch.normal(mean=0, std=1, size=noise.shape, dtype=torch.float64)
+walk_noise_y = torch.normal(mean=0, std=1, size=noise.shape, dtype=torch.float64)
 
 walk_scale_x = torch.cos(torch.linspace(0, walk_length, num_frames) * math.pi).double()
 walk_scale_y = torch.sin(torch.linspace(0, walk_length, num_frames) * math.pi).double()
@@ -151,7 +153,7 @@ for i in range(num_frames):
     audio_slice = audio[slice_start:slice_end]
 
     # bend is a function that defines how to apply network bending given a latent tensor and audio
-    audio_feature_value = audio_feature(audio_slice, SAMPLING_RATE)
+    audio_feature_value = audio_feature(audio_slice, SAMPLING_RATE) * audio_feature_scale
     print(">>> Audio Feature Value:", audio_feature_value)
     bend = bend_function(audio_feature_value)
 

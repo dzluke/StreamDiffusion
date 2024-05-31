@@ -140,8 +140,8 @@ class StreamDiffusion:
         self.bending_fn = bending_fn
         self.input_noise = None
         if input_noise is not None:
-            self.input_noise = input_noise.unsqueeze(0).permute(0, 3, 1, 2).to(self.device, dtype=self.dtype)
-            self.input_noise = 0.3 * self.input_noise + torch.randn(self.input_noise.shape, dtype=self.dtype, device=self.device)
+            self.input_noise = input_noise.to(self.device, dtype=self.dtype)
+            # self.input_noise = 0.3 * self.input_noise + torch.randn(self.input_noise.shape, dtype=self.dtype, device=self.device)
 
 
         self.generator = generator
