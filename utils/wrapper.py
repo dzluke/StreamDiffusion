@@ -146,7 +146,7 @@ class StreamDiffusionWrapper:
             if use_denoising_batch
             else frame_buffer_size
         )
-
+        self.seed = seed
         self.use_denoising_batch = use_denoising_batch
         self.use_safety_checker = use_safety_checker
 
@@ -206,6 +206,7 @@ class StreamDiffusionWrapper:
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,
             delta=delta,
+            seed=self.seed,
             bending_fn=bending_fn,
             input_noise=input_noise
         )

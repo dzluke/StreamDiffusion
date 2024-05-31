@@ -138,9 +138,16 @@ class StreamDiffusion:
         input_noise: Optional[torch.Tensor] = None,
     ) -> None:
         self.bending_fn = bending_fn
-        self.input_noise = input_noise
+        self.input_noise = None
+        if input_noise is not None:
+            self.input_noise = input_noise.unsqueeze(0).permute(0, 3, 1, 2).to(self.device, dtype=self.dtype)
+            self.input_noise = 0.3 * self.input_noise + torch.randn(self.input_noise.shape, dtype=self.dtype, device=self.device)
+
+
         self.generator = generator
         self.generator.manual_seed(seed)
+        self.seed = seed
+        self.seed_everything(self.seed)
         # initialize x_t_latent (it can be any random tensor)
         if self.denoising_steps_num > 1:
             self.x_t_latent_buffer = torch.zeros(
@@ -428,7 +435,7 @@ class StreamDiffusion:
                 ).repeat(
                     self.frame_bff_size,
                 )
-                x_0_pred, model_pred = self.unet_step(x_t_latent, t, idx)
+                x_0_pred, model_pred = self.unet_step(x_t_latent, t, idx)  # there are multiple calls to this function
                 if idx < len(self.sub_timesteps_tensor) - 1:
                     if self.do_add_noise:
                         x_t_latent = self.alpha_prod_t_sqrt[
@@ -478,19 +485,16 @@ class StreamDiffusion:
 
     @torch.no_grad()
     def txt2img(self, batch_size: int = 1) -> torch.Tensor:
-        # x_0_pred_out = self.predict_x0_batch(
-        #     torch.randn((batch_size, 4, self.latent_height, self.latent_width)).to(
-        #         device=self.device, dtype=self.dtype
-        #     )
-        # )
-
-        x_0_pred_out = self.predict_x0_batch(
-            self.input_noise.to(
-                device=self.device, dtype=self.dtype
+        if self.input_noise is not None:
+            # I think you actually need to bend in here, there are multiple unet calls
+            x_0_pred_out = self.predict_x0_batch(self.input_noise)
+        else:
+            x_0_pred_out = self.predict_x0_batch(
+                torch.randn((batch_size, 4, self.latent_height, self.latent_width)).to(
+                    device=self.device, dtype=self.dtype
+                )
             )
-        )
-
-        # apply network bending
+        # this isnt the right place to bend, i should bend in unet_step (or what calls unet_step)
         if self.bending_fn is not None:
             x_0_pred_out = self.bending_fn(x_0_pred_out)
 
@@ -513,3 +517,9 @@ class StreamDiffusion:
             x_t_latent - self.beta_prod_t_sqrt * model_pred
         ) / self.alpha_prod_t_sqrt
         return self.decode_image(x_0_pred_out)
+
+    def seed_everything(self, seed):
+        np.random.seed(seed)
+        torch.manual_seed(seed)
+        torch.cuda.manual_seed_all(seed)
+
