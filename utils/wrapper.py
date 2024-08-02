@@ -177,7 +177,8 @@ class StreamDiffusionWrapper:
 
     def prepare(
         self,
-        prompt: str,
+        prompt: str = "",
+        prompt_encoding: Optional[torch.Tensor] = None,
         negative_prompt: str = "",
         num_inference_steps: int = 50,
         guidance_scale: float = 1.2,
@@ -202,6 +203,7 @@ class StreamDiffusionWrapper:
         """
         self.stream.prepare(
             prompt,
+            prompt_encoding,
             negative_prompt,
             num_inference_steps=num_inference_steps,
             guidance_scale=guidance_scale,

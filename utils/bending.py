@@ -192,6 +192,10 @@ def add_full(r):
     return lambda x: x + (torch.ones_like(x) * r)
 
 
+def multiply(r):
+    return lambda x: x * r
+
+
 def add_sparse(r):
     """
     Return a fn that takes in a latent tensor and returns a tensor of the same shape, but with the value r

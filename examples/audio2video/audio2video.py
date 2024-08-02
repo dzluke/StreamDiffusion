@@ -3,11 +3,9 @@ import torch
 import math
 import librosa
 # from pydub import AudioSegment
-# import generatee
 from subprocess import run
 import time
 
-import utils.bending
 import utils.bending as util
 
 import os
@@ -28,6 +26,7 @@ def txt2img(wrapper, prompt, noise, bending_fn):
     wrapper.prepare(
         prompt=prompt,
         num_inference_steps=50,
+        guidance_scale=guidance_scale,
         bending_fn=bending_fn,
         input_noise=noise
     )
@@ -35,9 +34,31 @@ def txt2img(wrapper, prompt, noise, bending_fn):
     count = len(list(output.iterdir()))
     output_images = wrapper()
     output_images.save(os.path.join(output, f"{count:05}.png"))
-    # for i, output_image in enumerate(output_images):
-    #     output_image.save(os.path.join(output, f"{count + i:05}.png"))
 
+
+def encoding2img(wrapper, encoding, noise, bending_fn):
+    wrapper.prepare(
+        prompt_encoding=encoding,
+        num_inference_steps=50,
+        guidance_scale=guidance_scale,
+        bending_fn=bending_fn,
+        input_noise=noise
+    )
+    count = len(list(output.iterdir()))
+    output_images = wrapper()
+    output_images.save(os.path.join(output, f"{count:05}.png"))
+
+
+def encode_prompt(wrapper, prompt):
+    encoder_output = wrapper.stream.pipe.encode_prompt(
+        prompt=prompt,
+        device=wrapper.stream.device,
+        num_images_per_prompt=1,
+        do_classifier_free_guidance=do_classifier_free_guidance,
+        negative_prompt=negative_prompt,
+    )
+    prompt_embeds = encoder_output[0].repeat(wrapper.stream.batch_size, 1, 1)
+    return prompt_embeds
 
 # set constants
 TXT2IMG = True
@@ -60,9 +81,12 @@ height = 512
 frame_buffer_size = 1  # batch size
 acceleration = "xformers"
 seed = 46
+guidance_scale = 1.2
+do_classifier_free_guidance = True if guidance_scale > 1.0 else False
 t_index_list = [0, 16, 32, 45]
 
 prompt = "a floating orb"
+negative_prompt = "low quality"
 layer = 1
 bend_function = util.add_full
 bend_function_name = bend_function.__name__
@@ -71,7 +95,7 @@ audio_feature_scale = 10
 audio_feature_name = audio_feature.__name__
 
 
-stream = StreamDiffusionWrapper(
+wrapper = StreamDiffusionWrapper(
     model_id_or_path=model_id_or_path,
     lora_dict=lora_dict,
     t_index_list=t_index_list,  # the length of this list is the number of denoising steps
@@ -86,11 +110,13 @@ stream = StreamDiffusionWrapper(
     seed=seed,
     bending_fn=bend_function
 )
+
+
 if not TXT2IMG:
     # generate first frame using txt2img
-    txt2img(stream, prompt, None, None)
+    txt2img(wrapper, prompt, None, None)
     # create img2img stream
-    stream = StreamDiffusionWrapper(
+    wrapper = StreamDiffusionWrapper(
             model_id_or_path=model_id_or_path,
             lora_dict=lora_dict,
             t_index_list=[22, 32, 45],
@@ -120,6 +146,18 @@ args = util.run_argparse()
 
 audio_path = Path(args.audio)
 audio_path = Path("C:\\Users\dzluk\StreamDiffusion\inputs\gabeguitar.wav")
+prompt_file_path = Path("C:\\Users\dzluk\StreamDiffusion\inputs\prompts.txt")
+
+# read prompt file with format:
+# 0:00 : First prompt
+# 0:10 : Second prompt
+# etc...
+with open(prompt_file_path, "r") as f:
+    lines = [line.strip() for line in f.readlines()]
+    prompts = [line.split(":")[-1] for line in lines]
+    times = [float(line.split(":")[0]) * 60 + float(line.split(":")[1]) for line in lines]
+    prompt_times = [int(time * args.fps) for time in times]
+num_prompts = len(prompts)
 
 # load input audio
 audio, _ = librosa.load(audio_path, sr=SAMPLING_RATE)
@@ -132,20 +170,58 @@ print(f">>> Generating {num_frames} frames")
 
 # Adding sin wave noise
 walk_length = 2  # set to 2 for 2pi walk
-noise = torch.empty((1, 4, stream.stream.latent_height, stream.stream.latent_width), dtype=torch.float64)
-# walk_noise_x = torch.distributions.normal.Normal(0, 1).sample(noise.shape).double()
-# walk_noise_y = torch.distributions.normal.Normal(0, 1).sample(noise.shape).double()
+noise = torch.empty((1, 4, wrapper.stream.latent_height, wrapper.stream.latent_width), dtype=torch.float64)
 walk_noise_x = torch.normal(mean=0, std=1, size=noise.shape, dtype=torch.float64)
 walk_noise_y = torch.normal(mean=0, std=1, size=noise.shape, dtype=torch.float64)
-
 walk_scale_x = torch.cos(torch.linspace(0, walk_length, num_frames) * math.pi).double()
 walk_scale_y = torch.sin(torch.linspace(0, walk_length, num_frames) * math.pi).double()
 noise_x = torch.tensordot(walk_scale_x, walk_noise_x, dims=0)
 noise_y = torch.tensordot(walk_scale_y, walk_noise_y, dims=0)
 batched_noise = noise_x + noise_y
 
+# calculate audio features
+audio_features = []
+audio_feature_name = audio_feature.__name__
+for i in range(0, num_frames):
+    slice_start = int(i * frame_length * SAMPLING_RATE)
+    slice_end = int((i + 1) * frame_length * SAMPLING_RATE)
+    audio_slice = audio[slice_start:slice_end]
+    value = audio_feature(audio_slice, SAMPLING_RATE)
+    value *= audio_feature_scale
+
+    # clamp_lim = 250
+    # combo = 0 if combo < 0 else clamp_lim if combo >= clamp_lim else combo
+    audio_features.append(value)
+
+# apply smoothing to audio features
+smoothing_fn = None
+if smoothing_fn is not None:
+    audio_features = smoothing_fn(audio_features)
+
+# calculate min/max for scaling
+audio_features_max = max(audio_features)
+audio_features_min = min(audio_features)
+
+# do prompt interpolations
+prompt_embeddings = []
+for i in range(num_prompts - 1):
+    start_prompt, end_prompt = prompts[i], prompts[i + 1]
+    start_frame, end_frame = prompt_times[i], prompt_times[i + 1]
+
+    start_embedding = encode_prompt(wrapper, start_prompt)
+    end_embedding = encode_prompt(wrapper, end_prompt)
+
+    embeddings = np.linspace(start_embedding.cpu(), end_embedding.cpu(), num=(end_frame - start_frame))
+    prompt_embeddings.append(embeddings)
+prompt_embeddings = np.vstack(prompt_embeddings)
+prompt_embeddings = torch.from_numpy(prompt_embeddings).to(wrapper.stream.device)
+padding = num_frames - prompt_times[-1]
+# if padding > 0:
+#     prompt_embeddings = torch.nn.functional.pad(prompt_embeddings, (0, padding), mode='replicate')
+
 
 # generate frames
+prompt_embedding = prompt_embeddings[0]
 for i in range(num_frames):
     print(f"Frame {i} / {num_frames}")
     slice_start = int(i * frame_length * SAMPLING_RATE)
@@ -158,13 +234,17 @@ for i in range(num_frames):
     bend = bend_function(audio_feature_value)
 
     if TXT2IMG:
-        txt2img(stream, prompt, batched_noise[i], bend)
+        try:
+            prompt_embedding = prompt_embeddings[i]
+        except IndexError:
+            # the length of prompt_embeddings is shorter than num_frames, so just use the previous prompt_embedding
+            pass
+        encoding2img(wrapper, prompt_embedding, batched_noise[i], bend)
     else:
         if i == 0: continue
         guidance_scale = 0.5
-        negative_prompt = "low quality"
         delta = 0.5
-        stream.prepare(
+        wrapper.prepare(
             prompt=prompt,
             negative_prompt=negative_prompt,
             num_inference_steps=50,
@@ -174,8 +254,8 @@ for i in range(num_frames):
         # randomness = np.random.rand(512, 512) * 255
         # input_image = Image.fromarray(randomness, mode='L')
         input_image = Image.open(os.path.join(output, f"{i-1:05}.png"))
-        image_tensor = stream.preprocess_image(input_image)
-        output_image = stream(image=image_tensor)
+        image_tensor = wrapper.preprocess_image(input_image)
+        output_image = wrapper(image=image_tensor)
         output_image.save(os.path.join(output, f"{i:05}.png"))
 
     # every 10 seconds, create an in progress video

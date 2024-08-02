@@ -127,7 +127,8 @@ class StreamDiffusion:
     @torch.no_grad()
     def prepare(
         self,
-        prompt: str,
+        prompt: str = "",
+        prompt_encoding: Optional[torch.Tensor] = None,
         negative_prompt: str = "",
         num_inference_steps: int = 50,
         guidance_scale: float = 1.2,
@@ -173,14 +174,17 @@ class StreamDiffusion:
         if self.guidance_scale > 1.0:
             do_classifier_free_guidance = True
 
-        encoder_output = self.pipe.encode_prompt(
-            prompt=prompt,
-            device=self.device,
-            num_images_per_prompt=1,
-            do_classifier_free_guidance=do_classifier_free_guidance,
-            negative_prompt=negative_prompt,
-        )
-        self.prompt_embeds = encoder_output[0].repeat(self.batch_size, 1, 1)
+        if prompt_encoding is None:
+            encoder_output = self.pipe.encode_prompt(
+                prompt=prompt,
+                device=self.device,
+                num_images_per_prompt=1,
+                do_classifier_free_guidance=do_classifier_free_guidance,
+                negative_prompt=negative_prompt,
+            )
+            self.prompt_embeds = encoder_output[0].repeat(self.batch_size, 1, 1)
+        else:
+            self.prompt_embeds = prompt_encoding
 
         if self.use_denoising_batch and self.cfg_type == "full":
             uncond_prompt_embeds = encoder_output[1].repeat(self.batch_size, 1, 1)
