@@ -184,6 +184,7 @@ class StreamDiffusionWrapper:
         guidance_scale: float = 1.2,
         delta: float = 1.0,
         bending_fn: Optional[Callable] = None,
+        bending_layer: Optional[int] = None,
         input_noise: Optional[torch.Tensor] = None,
     ) -> None:
         """
@@ -210,6 +211,7 @@ class StreamDiffusionWrapper:
             delta=delta,
             seed=self.seed,
             bending_fn=bending_fn,
+            bending_layer=bending_layer,
             input_noise=input_noise
         )
 

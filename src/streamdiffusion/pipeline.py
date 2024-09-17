@@ -26,7 +26,7 @@ class StreamDiffusion:
         frame_buffer_size: int = 1,
         cfg_type: Literal["none", "full", "self", "initialize"] = "self",
         bending_fn: Optional[Callable[[torch.Tensor], torch.Tensor]] = None,
-
+        bending_layer: Optional[int] = None
     ) -> None:
         self.device = pipe.device
         self.dtype = torch_dtype
@@ -44,6 +44,7 @@ class StreamDiffusion:
         self.cfg_type = cfg_type
 
         self.bending_fn = bending_fn
+        self.bending_layer = bending_layer
 
         if use_denoising_batch:
             self.batch_size = self.denoising_steps_num * frame_buffer_size
@@ -136,9 +137,11 @@ class StreamDiffusion:
         generator: Optional[torch.Generator] = torch.Generator(),
         seed: int = 2,
         bending_fn: Optional[Callable] = None,
+        bending_layer: Optional[int] = None,
         input_noise: Optional[torch.Tensor] = None,
     ) -> None:
         self.bending_fn = bending_fn
+        self.bending_layer = bending_layer
         self.input_noise = None
         if input_noise is not None:
             self.input_noise = input_noise.to(self.device, dtype=self.dtype)
@@ -329,6 +332,12 @@ class StreamDiffusion:
         else:
             x_t_latent_plus_uc = x_t_latent
 
+        # do network bending
+        if self.bending_fn is not None and idx == self.bending_layer:
+            x_t_latent_plus_uc = x_t_latent_plus_uc.squeeze(0)
+            x_t_latent_plus_uc = self.bending_fn(x_t_latent_plus_uc)
+            x_t_latent_plus_uc = x_t_latent_plus_uc.unsqueeze(0)
+
         model_pred = self.unet(
             x_t_latent_plus_uc,
             t_list,
@@ -500,7 +509,9 @@ class StreamDiffusion:
             )
         # this isnt the right place to bend, i should bend in unet_step (or what calls unet_step)
         if self.bending_fn is not None:
+            x_0_pred_out = x_0_pred_out.squeeze()
             x_0_pred_out = self.bending_fn(x_0_pred_out)
+            x_0_pred_out = x_0_pred_out.unsqueeze(0)
 
         x_output = self.decode_image(x_0_pred_out).detach().clone()
         return x_output
