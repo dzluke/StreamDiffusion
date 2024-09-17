@@ -50,6 +50,13 @@ def time_string(seconds):
     return "{}h {}m {}s".format(t['h'], t['m'], t['s'])
 
 
+def scale_range(value, oldmin, oldmax, newmin, newmax):
+    """
+    Scale 'value' from the range (oldmin, oldmax) to the range (newmin, newmax)
+    """
+    return (((value - oldmin) * (newmax - newmin)) / (oldmax - oldmin)) + newmin
+
+
 def rms(audio, sr):
     return np.sqrt(np.mean(audio**2))
 
@@ -469,7 +476,6 @@ def rotate_x(r):
     Rotates along "x" axis
     """
     def fn(x):
-        device = x.get_device()
         c = math.cos(r)
         s = math.sin(r)
         rotation_matrix = [
@@ -478,7 +484,7 @@ def rotate_x(r):
             [0, s,   c,    0],
             [0, 0,   0,    1]
         ]
-        op = torch.tensor(rotation_matrix).to(device)
+        op = torch.tensor(rotation_matrix).to(x)  # this sets the device and dtype !
         x = torch.tensordot(op, x, dims=1)
         return x
     return fn
