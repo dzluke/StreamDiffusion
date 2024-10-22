@@ -142,6 +142,7 @@ pip install --force-reinstall pywin32
 
 ```bash
 python setup.py develop easy_install streamdiffusion[tensorrt]
+# you may need to downgrade hugginface_hub version by running pip install huggingface_hub==0.24.7
 python -m streamdiffusion.tools.install-tensorrt
 ```
 
@@ -152,6 +153,16 @@ git clone https://github.com/cumulo-autumn/StreamDiffusion.git
 cd StreamDiffusion
 docker build -t stream-diffusion:latest -f Dockerfile .
 docker run --gpus all -it -v $(pwd):/home/ubuntu/streamdiffusion stream-diffusion:latest
+```
+
+
+### For Network Bending
+Yes, you have to uninstall and then reinstall soundfile.
+```bash
+conda install scipy
+conda install librosa
+pip uninstall soundfile
+pip install soundfile
 ```
 
 ## Quick Start
