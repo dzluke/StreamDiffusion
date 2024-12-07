@@ -5,6 +5,7 @@ import torch
 import scipy.linalg
 import random
 # from kornia import morphology, filters
+from scipy.signal import medfilt
 
 SAMPLING_RATE = None
 
@@ -57,12 +58,80 @@ def scale_range(value, oldmin, oldmax, newmin, newmax):
     return (((value - oldmin) * (newmax - newmin)) / (oldmax - oldmin)) + newmin
 
 
+def noise_gate(data, percentage):
+    """
+    Apply a noise gate to data, which turns any value in the lowest percentage to 0
+    Parameters
+    ----------
+    data: np array
+    percentage: float in range (0, 1)
+
+    Returns a new np array
+    -------
+    """
+    threshold = (percentage * (data.max() - data.min())) + data.min()
+    modified_array = np.where(np.abs(data) < threshold, 0, data)  # TODO: fix for negative values
+    return modified_array
+
+
+def median_filtering(data, kernel_size):
+    return medfilt(data, kernel_size)
+
+
+def envelope_follower(audio, alpha):
+    # my version:
+    output = np.zeros_like(audio)
+    output[0] = audio[0]
+    for i in range(1, audio.size):
+        curr = audio[i]
+        prev = output[i - 1]
+        if abs(curr) > abs(prev):
+            output[i] = curr
+        else:
+            output[i] = ((1 - alpha) * curr) + (alpha * prev)
+    return output
+
+
+def gate_median(threshold, kernel_size):
+    def apply_filtering(audio):
+        gated = noise_gate(audio, threshold)
+        filtered = median_filtering(gated, kernel_size)
+        return filtered, f"gate{threshold}median{kernel_size}"
+    return apply_filtering
+
+
+def smooth(kernel_size, envelope_alpha, noise_threshold):
+    """
+    Returns a function that will apply smoothing to input time series data
+    First it applies median filtering, then envelope following, then a noise gate
+    Parameters
+    ----------
+    kernel_size
+    envelope_alpha
+    noise_threshold
+
+    Returns: a fn that returns smoothed input and a str that contains info on the input params
+    -------
+    """
+    def apply_filtering(audio):
+        filtered = median_filtering(audio, kernel_size)
+        enveloped = envelope_follower(filtered, envelope_alpha)
+        gated = noise_gate(enveloped, noise_threshold)
+        return gated, f"median{kernel_size}envelope{envelope_alpha}gate{noise_threshold}"
+    return apply_filtering
+
+
 def rms(audio, sr):
     return np.sqrt(np.mean(audio**2))
 
 
 def next_power_of_2(x):
     return 1 if x == 0 else 2**(x - 1).bit_length()
+
+
+###################
+# AUDIO FEATURES #
+##################
 
 
 def spectrum(audio, sr):
@@ -186,6 +255,28 @@ def flux(spectrum1, spectrum2):
     return spectral_flux
 
 
+def encodec(model, processor):
+    def encodec_feature(audio, sr):
+        """
+        Pass input audio to the EnCodec auto-encoder
+
+        model = EncodecModel.from_pretrained("facebook/encodec_48khz")
+        processor = AutoProcessor.from_pretrained("facebook/encodec_48khz")
+        """
+        assert sr == processor.sampling_rate, "Input SR must equal SR of EnCodec model (48kHz)"
+        if audio.ndim == 1:
+            audio = np.stack((audio, audio), axis=0)  # make fake stereo
+
+        # pre-process the inputs
+        inputs = processor(raw_audio=audio, sampling_rate=processor.sampling_rate, return_tensors="pt")
+
+        # explicitly encode then decode the audio inputs
+        encoder_outputs = model.encode(inputs["input_values"], inputs["padding_mask"])
+        matrix = encoder_outputs[0].squeeze()
+        return matrix[0]
+    return encodec_feature
+
+
 #############################
 # NETWORK BENDING FUNCTIONS #
 #############################
@@ -201,6 +292,10 @@ def add_full(r):
 
 def multiply(r):
     return lambda x: x * r
+
+
+def tensor_multiply(op):
+    return lambda x: torch.tensordot(op, x, dims=1)
 
 
 def add_sparse(r):
@@ -530,6 +625,59 @@ def rotate_y2(r):
         x = torch.tensordot(op, x, dims=1)
         return x
     return fn
+
+
+def make_rotation_matrix(angle, plane):
+    """
+    ChatGPT wrote this
+    Generate a 4x4 rotation matrix for a specific plane in 4D space using PyTorch.
+
+    Args:
+        angle (float): Rotation angle in radians (as a torch scalar or float).
+        plane (tuple): A pair of axes defining the plane (e.g., (0, 1) for x_1x_2).
+
+    Returns:
+        torch.Tensor: The 4x4 rotation matrix as a PyTorch tensor.
+    """
+    dim = 4
+    matrix = torch.eye(dim)  # Initialize as identity matrix
+    i, j = plane
+    angle = torch.tensor(angle)
+
+    # Rotation in the specified plane
+    matrix[i, i] = torch.cos(angle)
+    matrix[j, j] = torch.cos(angle)
+    matrix[i, j] = -torch.sin(angle)
+    matrix[j, i] = torch.sin(angle)
+
+    return matrix
+
+
+def make_six_plane_rotation_matrix(angles):
+    """
+    ChatGPT wrote this
+    Generate the combined 4x4 rotation matrix for all six planes using PyTorch.
+
+    Args:
+        angles (list of float): List of six rotation angles in radians (as torch tensors or floats).
+
+    Returns:
+        torch.Tensor: The combined 4x4 rotation matrix as a PyTorch tensor.
+    """
+    planes = [(0, 1), (0, 2), (0, 3), (1, 2), (1, 3), (2, 3)]
+    combined_matrix = torch.eye(4)  # Start with identity matrix
+    for angle, plane in zip(angles, planes):
+        # Multiply the matrices (from left to right)
+        combined_matrix = torch.matmul(combined_matrix, make_rotation_matrix(angle, plane))
+    return combined_matrix
+
+
+def six_plane_rotation(angles):
+    def rotate(x):
+        matrix = make_six_plane_rotation_matrix(angles)
+        matrix = matrix.to(x)
+        return torch.tensordot(matrix, x, dims=1)
+    return rotate
 
 
 def reflect(r):
